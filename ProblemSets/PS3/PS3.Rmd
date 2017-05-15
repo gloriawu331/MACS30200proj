@@ -79,6 +79,7 @@ ggplot(biden_augment_1, aes(hat, student)) +
 ```
 
  There are `r nrow(biden_augment_1)` unusual and influential observations. `r nrow(filter(biden_augment_1, infl==200))` have high influence. `r nrow(filter(biden_augment_1, lev==2))` have high leverage. And `r nrow(filter(biden_augment_1, disc==20))` have high discrepancy. Since there are many unusual and influential observations, and the interactions among these features are complex, we need very careful consideration to decide how we would deal with these observations.
+ Here I would make the decision on the basis of the distribution of unusual and influential observations on `gender`.
  
 ```{r rd_1_test2}
 biden_augment%>%
@@ -110,7 +111,7 @@ ggplot(biden_augment_2, mapping = aes(x = female)) +
 ```
 
   According to the bar plots above, the distributions of leverage, discrepant, and influential observations are not random. We don't have equal proportions of unusual and influential observations over all observations with the same gender. Simply dropping these observations may cause bias. Also, respecifying the model would not help much in this case.
-  I would try collecting additional variables to control for this influential effect. For this dataset, there are only `rep` and `dem` left unusued. So I would add these two variables to the model, and then check adding the two controlling variables could help solve the problem.
+  I would try collecting additional variables to control for this influential effect. For this dataset, there are only `rep` and `dem` left unusued. So I would add these two variables to the model, and then check whether adding the two controlling variables could help solve the problem.
 
 
 ### 2. Test for non-normally distributed errors
