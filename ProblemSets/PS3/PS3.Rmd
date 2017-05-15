@@ -6,7 +6,8 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, 
+                      message=FALSE, fig.align="center")
 library(tidyverse)
 library(forcats)
 library(broom)
@@ -19,6 +20,8 @@ library(haven)
 library(car)
 library(lmtest)
 library(MVN)
+library(Amelia)
+library(GGally)
 
 options(digits = 3)
 set.seed(1234)
@@ -42,7 +45,7 @@ rd_mod <- lm(biden ~ age + female + educ, data = biden_data)
 summary(rd_mod)
 ```
 
-  The plot below shows the bubble plot of leverage, discrepancy, and influence.
+  The plot below shows the bubble plot of leverage, discrepancy, and influence, indicating unusual and influential observations.
 
 ```{r rd_1_tests}
 # add key statistics
@@ -70,11 +73,45 @@ ggplot(biden_augment_1, aes(hat, student)) +
   geom_vline(xintercept = 2 * mean_hat, linetype = 2) +
   geom_point(aes(size = cooksd, color=unusual), shape = 1) +
   scale_size_continuous(range = c(1, 20)) +
-  labs(x = "Leverage, ",
+  labs(x = "Leverage, discrepant, or influential observations",
        y = "Studentized residual") +
-  theme(legend.position = "none")#+
-  #scale_size(guide = "none")
+  theme(legend.position = "none")
 ```
+
+ There are `r nrow(biden_augment_1)` unusual and influential observations. `r nrow(filter(biden_augment_1, infl==200))` have high influence. `r nrow(filter(biden_augment_1, lev==2))` have high leverage. And `r nrow(filter(biden_augment_1, disc==20))` have high discrepancy. Since there are many unusual and influential observations, and the interactions among these features are complex, we need very careful consideration to decide how we would deal with these observations.
+ 
+```{r rd_1_test2}
+biden_augment%>%
+  mutate(influential = factor(ifelse(infl == 200, "influential", "others"))) %>%
+  mutate(discrepant = factor(ifelse(disc == 20, "discrepant", "others")))%>%
+  mutate(levg = factor(ifelse(lev == 2, "leverage", "others")))%>%
+  {.} -> biden_augment_2
+
+ggplot(biden_augment_2, mapping = aes(x = female)) +
+  geom_histogram(mapping = aes(fill = influential), width = 0.5, stat="count") +
+  labs(title = "Distribution of gender among usual/influential observations",
+        x = "Female",
+        y = "Frequency count of individuals") +
+  guides(fill = guide_legend(title = ''))
+
+ggplot(biden_augment_2, mapping = aes(x = female)) +
+  geom_histogram(mapping = aes(fill = discrepant), width = 0.5, stat="count") +
+  labs(title = "Distribution of gender among usual/influential observations",
+        x = "Female",
+        y = "Frequency count of individuals") +
+  guides(fill = guide_legend(title = ''))
+
+ggplot(biden_augment_2, mapping = aes(x = female)) +
+  geom_histogram(mapping = aes(fill = levg), width = 0.5, stat="count") +
+  labs(title = "Distribution of gender among usual/influential observations",
+        x = "Female",
+        y = "Frequency count of individuals") +
+  guides(fill = guide_legend(title = ''))
+```
+
+  According to the bar plots above, the distributions of leverage, discrepant, and influential observations are not random. We don't have equal proportions of unusual and influential observations over all observations with the same gender. Simply dropping these observations may cause bias. Also, respecifying the model would not help much in this case.
+  I would try collecting additional variables to control for this influential effect. For this dataset, there are only `rep` and `dem` left unusued. So I would add these two variables to the model, and then check adding the two controlling variables could help solve the problem.
+
 
 ### 2. Test for non-normally distributed errors
 
@@ -92,7 +129,7 @@ augment(rd_mod, biden_data) %>%
        y = "Estimated density")
 ```
 
-  Power and log transformations are typically used to correct this problem. However, the log transformation of 0 would lead to missing value, which would cause problems to the regression model. Then I tried the power transformation to the variable `biden`. I squared `biden` and perform another linear regression model. However, according to the new quantile-comparison plot, the problem of non-normally distributed errors is not solved well. The new model has even more serious non-normally distributed errors. Thus the solution would need further consideration.
+  Power and log transformations are typically used to correct this problem. However, the log transformation of 0 would lead to missing value, which would cause problems to the regression model. So I tried the power transformation to the variable `biden`. I squared `biden` and perform another linear regression model. However, according to the new quantile-comparison plot, the problem of non-normally distributed errors is not solved well. The new model has even more serious non-normally distributed errors. Thus we need further consideration for the solution.
 
 ```{r rd_2_fix}
 biden_data <- biden_data %>%
@@ -146,7 +183,6 @@ bptest(rd_mod)
   The plot and VIF show that there is no multicollinearity in this model. `age`, `gender` and `educ` are not correlated with eath other. The plot doesn't support correlation between any two of the variables. And since none of the values in the VIF is above 10, again, there is no multicollinearity among these variables.
 
 ```{r rd_4}
-library(GGally)
 ggpairs(select_if(biden_data, is.numeric))
 vif(rd_mod)
 ```
@@ -236,14 +272,13 @@ linearHypothesis(it_mod, "educ + age:educ")
 ## Part III: Missing Data
 
 ```{r md_read_data}
-library(Amelia)
 biden_all <- read.csv('biden.csv')
 ```
 
 ### Multivariate normality assumptions
 
   According to the result of Mardia's multivariate normality test, data are not multivariate normal. And the corresponding qqplot supports this conclusion.
-  The qqplots on each of the variable show that variable `educ` violates the normality assumption. Although `gender` also violates normality assumption, this makes sense, since `gender` is a dichotomous variable. Although `age` does not perfectly fits the normal distribution, it is very close. We should consider variable transformation on `educ`.
+  The qqplots on each of the variable show that variable `educ` violates the normality assumption. Although `gender` also violates normality assumption, this makes sense, since `gender` is a dichotomous variable. Although `age` does not perfectly fit the normal distribution, its distribution is very close. We should consider variable transformation on `educ`.
 
 ```{r md_1}
 biden_used <- biden_all%>%
@@ -254,11 +289,10 @@ mardiaTest(biden_used, qqplot = TRUE)
 uniPlot(biden_used, type="qqplot")
 ```
 
-
 ### Variables transformation
 
   I tried educ-squared to fix the problem of non-normality of `educ`.
-  Although the result of Mardia's multivariate normality test still indicates that data are not multivariate normal, the problem is much less serious. The data is improved with the transformation of `educ`.
+  Although the result of Mardia's multivariate normality test still indicates that data are not multivariate normal, the problem is much less serious. The data distribution is improved with the transformation of `educ`.
 
 ```{r md_2}
 biden_trans <- biden_used%>%
@@ -273,29 +307,35 @@ mardiaTest(biden_trans, qqplot = TRUE)
 
 ### Multiple imputation
 
-Firstly, check the missingness of the data. According to the missingness map, there are many missing values in `biden`, some missing values in `age`, a few missing values in `educ`, and almost (or completely) no missing value in `gender`.
+  Firstly, check the missingness of the data. According to the missingness map, there are many missing values in `biden`, some missing values in `age`, a few missing values in `educ`, and almost (or completely) no missing value in `gender`.
 
-```{r md_3_1}
-missmap(as.data.frame(biden_used))
-```
-
-```{r md_3_2, echo=FALSE}
+```{r md_3_1, echo=FALSE}
 #biden.out <- amelia(as.data.frame(biden_trans), m = 5)
 biden.out <- biden_all %>%
-  mutate(dem = as.numeric(dem),
-         rep = as.numeric(rep)) %>%
+  select(-dem, -rep)%>%
   amelia(., m=5, sqrts = c("age", "educ"),
-         noms = c("female", "dem", "rep"), p2s = 0)
+         noms = c("female"), p2s = 0)
 missmap(biden.out)
 ```
 
-```{r md_3_3}
+  Contents below show results of multiple imputation using `Amelia`.
+
+```{r md_3_2}
 str(biden.out$imputations, max.level=2)
 ```
 
+  In the previous step of this part, I found that `educ` should be squared to adjust the non-normality problem. So I estimate the original model without missing data and the new model with multi imputation using `educ^2`.
+
 ```{r md_new_model}
+cat("Linear Regression Model with edu^2")
+cat()
+models_ori <- lm(biden ~ age + female + educ^2, data=biden_data)
+summary(models_ori)
+
+cat("Multiple Imputation Model")
+cat()
 models_imp <- data_frame(data = biden.out$imputations) %>%
-  mutate(model = map(data, ~ lm(biden ~ age + female + educ,
+  mutate(model = map(data, ~ lm(biden ~ age + female + educ^2,
                                 data = .x)),
          coef = map(model, tidy)) %>%
   unnest(coef, .id = "id")
@@ -327,7 +367,7 @@ mi.meld.plus <- function(df_tidy){
 ```
 
 ```{r md_comparison}
-tidy(rd_mod) %>%
+tidy(models_ori) %>%
   left_join(mi.meld.plus(models_imp)) %>%
   select(-statistic, -p.value)
 ```
